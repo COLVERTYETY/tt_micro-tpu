@@ -1,5 +1,5 @@
 from amaranth import *
-from amaranth import Elaboratable, Module, Signal, unsigned, Const 
+from amaranth import Elaboratable, Module, Signal, unsigned, Const , Mux
 from amaranth.sim import Simulator
 from amaranth.back import rtlil, verilog
 from amaranth.lib.crc import Algorithm
@@ -117,7 +117,7 @@ class tpu(wiring.Component):
         self.clk = Signal()
         self.rst_n = Signal()
 
-        self.memory = Array(Signal(unsigned(8)) for i in range(4*16))
+        self.memory = Array(Signal(unsigned(8), name=f"m_{i}") for i in range(4*16))
         self.mp = Signal(unsigned(8))
         
         self.index_A = Signal(unsigned(8))
@@ -128,20 +128,27 @@ class tpu(wiring.Component):
     def elaborate(self, platform):
         m = Module()
         
+        # tmp = Signal(unsigned(8))
 
         m.d.comb += self.index_A.eq(self.input2[6:8] * 16)
         m.d.comb += self.index_B.eq(self.input2[4:6] * 16)
         m.d.comb += self.index_C.eq(self.input2[2:4] * 16)       
 
+        # m.d.sync+= self.mp.eq(self.input2*(self.input[0:4]==Const(op.SETMP.value)))
+        # m.d.comb += tmp.eq(self.mp)
         with m.Switch(self.input[0:4]):
             with m.Case(op.SETMP.value):
                 m.d.sync += self.mp.eq(self.input2)
             with m.Case(op.WRITE.value):
                 m.d.sync += self.memory[self.mp].eq(self.input2)
                 m.d.sync += self.mp.eq(self.mp + 1)
+                # m.d.sync += self.memory[tmp].eq(self.input2)
+                # m.d.sync += self.mp.eq(self.mp + 1)
             with m.Case(op.READ.value):
                 m.d.sync += self.output.eq(self.memory[self.mp])
                 m.d.sync += self.mp.eq(self.mp + 1)
+                # m.d.sync += self.output.eq(self.memory[tmp])
+                # m.d.sync += self.mp.eq(self.mp + 1)
             with m.Case(op.MMUL.value):
                 for i in range(4):
                     for j in range(4):
@@ -200,12 +207,12 @@ def test():
             table = []
             prev = int(ctx.get(dut.memory[0]))
             prev_start=0
-            for i, val in enumerate(dut.memory):
-                value = ctx.get(val)
+            for i, val in enumerate(dut.memory[1:]):
+                value = int(ctx.get(val))
                 if value!=prev:
                     table.append((prev_start, i, prev))
                     prev = int(value)
-                    prev_start = i
+                    prev_start = i+1
             table.append((prev_start, len(dut.memory)-1, int(ctx.get(dut.memory[-1]))))
             print(tabulate.tabulate(table, headers=headers))
 
@@ -218,6 +225,39 @@ def test():
             inputs.append((op.WRITE, 3))
         for i in range(16):
             inputs.append((op.WRITE, 4))
+        # await ctx.tick()
+        # once = True
+        for inp in inputs:
+            ctx.set(dut.input,  int(inp[0]))
+            ctx.set(dut.input2, inp[1])
+            await ctx.tick()
+            # ctx.set(dut.input,  0)
+            # ctx.set(dut.input2, 0)
+            # if once: await ctx.tick()
+            display()
+        inputs = [(op.SETMP, 0)]
+        for i in range(64):
+            inputs.append((op.READ, 0))
+        outputs = []
+        once = True
+        # await ctx.tick()
+        for inp in inputs:
+            ctx.set(dut.input,  int(inp[0]))
+            ctx.set(dut.input2, inp[1])
+            await ctx.tick().repeat(1)
+            # if once: await ctx.tick()
+            if not once: outputs.append(int(ctx.get(dut.output)))
+            once = False
+        print(outputs)
+        for i in range(0,16):
+            assert outputs[i]==1, f"expected 1 got {outputs[i]} at {i}"
+        for i in range(16,32):
+            assert outputs[i]==2, f"expected 2 got {outputs[i]} at {i}"
+        for i in range(32,48):
+            assert outputs[i]==3, f"expected 3 got {outputs[i]} at {i}"
+        for i in range(48,63):
+            assert outputs[i]==4, f"expected 4 got {outputs[i]} at {i}"
+
         inp2 = []
         inp2.extend(int2list(1))
         inp2.extend(int2list(2))
