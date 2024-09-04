@@ -303,3 +303,29 @@ async def test_MATMUL(dut):
             await ClockCycles(dut.clk, 1)
             once = False
         assert dut.uo_out.value == 32 , f"matmul doesn't return correct result"
+
+@cocotb.test()
+async def test_full_random(dut):
+    dut._log.info("Start")
+
+    # Set the clock period to 10 us (100 KHz)
+    clock = Clock(dut.clk, 10, units="us")
+    cocotb.start_soon(clock.start())
+
+    # Reset
+    dut._log.info("Reset")
+    dut.ena.value = 1
+    dut.ui_in.value = 0
+    dut.uio_in.value = 0
+    dut.rst_n.value = 0
+    await ClockCycles(dut.clk, 10)
+    dut.rst_n.value = 1
+
+    dut._log.info("Test all possible ionputs")
+
+    for i in range(256):
+        for j in range(256):
+            dut.ui_in.value = i
+            dut.uio_in.value = j
+            await ClockCycles(dut.clk, 1)
+            assert dut.rst_n.value == 1 
